@@ -15,26 +15,15 @@ Options:
 
 # coding: utf-8
 from docopt import docopt
-import os
-
 from utils.Log import Log
 from utils.Env import Env
+from api.Notion import Notion
+from api.RGAA import Rules
 log = Log()
 env = Env()
 
 
-class ExportToNotion:
-
-    def __init__(self):
-        pass
-
-    def get_criteria(self, path):
-        for root, subdirs, files in os.walk(path):
-            print(root, subdirs, files)
-        print("criteria")
-
-    def add_criteria(self):
-        pass
+notion = Notion('APIKEY', 'BASERULES', 'BASETESTS')
 
 
 if __name__ == '__main__':
@@ -43,6 +32,21 @@ if __name__ == '__main__':
     #dry = arguments['--dry']
     #env = arguments['ENV'] or ".env"
 
-    if(env.exists('NOTION_RGAA_BASE_ID')):
-        notion = ExportToNotion()
-        notion.get_criteria("../src/rgaa/criteres")
+    if (not env.exists('NOTION_RGAA_BASE_ID')):
+        raise Exception("Vous devez fournir un identifiant de base Notion")
+
+    #e = ExportToNotion()
+    #e.export_to_notion("../src/rgaa/criteres")
+
+    rgaa = Rules()
+    rules = rgaa.all_rules()
+    categories = rgaa.all_categories()
+
+    #print(rules)
+    #print(list(rules.values()))
+    for rule in list(rules.values())[1:10]:       
+        id = notion.create_rule(rule)
+
+        for test in rule.get('tests'):
+            notion.create_test(id, test)
+            pass

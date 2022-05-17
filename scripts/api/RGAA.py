@@ -2,84 +2,104 @@ from contextlib import nullcontext
 from datetime import datetime
 import json
 import requests
+import os
+from markdown import Markdown
+from io import StringIO
+from pathlib import Path
+
+# https://stackoverflow.com/questions/761824/python-how-to-convert-markdown-formatted-text-to-text
+def unmark_element(element, stream=None):
+    if stream is None:
+        stream = StringIO()
+    if element.text:
+        stream.write(element.text)
+    for sub in element:
+        unmark_element(sub, stream)
+    if element.tail:
+        stream.write(element.tail)
+    return stream.getvalue()
 
 
-class BetaGouvStartups:
+# patching Markdown
+Markdown.output_formats["plain"] = unmark_element
+__md = Markdown(output_format="plain")
+__md.stripTopLevelTags = False
+
+
+def unmark(text):
+    return __md.convert(text)
+
+
+class Rules:
 
     def __init__(self):
         self.url = "https://beta.gouv.fr/api/v2.3/startups.json"
-        self.incubators = {}
-        self.startups = {}
+        self.categories = {}
+        self.rules = {}
 
-    def all(self):
-        # Récupérer les données de l'API
-        startups = json.loads(requests.get(self.url).text)
-
-        self.incubators = {i.get('id'): i.get("attributes").get(
-            "title") for i in startups.get("included")}
-
-        # Load result in a nice dict
-        for se in startups.get('data'):
-            incubator_id = "/incubators/{name}".format(name=se.get(
-                'relationships').get('incubator').get('data').get('id'))
-
-            self.startups[se.get('id')] = dict(
-                name=se.get('attributes').get('name'),
-                phase=se.get('attributes').get('phases')[-1].get('name'),
-                mission=se.get('attributes').get('pitch'),
-                incubator=self.incubators.get(incubator_id),
-                statistiques=se.get("attributes").get('stats_url'),
-                start=se.get('attributes').get('phases')[0].get('start'),
-            )
-
-        return self.startups
-
-    def get(self, id):
-        return self.startups.get(id)
+        self.__load_categories()
+        self.__load_rules()
 
 
-class BetaGouvMembers:
-    # Beta.gouv.fr community
+    def __load_categories(self):
+        path = '../src/_data/themes.json'
+        f = open(path)
+        self.categories = json.load(f)
 
-    def __init__(self):
-        self.url = "https://beta.gouv.fr/api/v2.3/authors.json"
-        self.members = {}
+    def __load_rules(self):
+        path = '../src/rgaa/criteres/'
+        rules={}
+        for root, subdirs, files in os.walk(path):
+            for file in files:
+                #print(root, file)
+                dir = root.rsplit('/', 1)[1] # Dernier élément du chemin, "12.1" ou "tests" par exemple
 
-        data = json.loads(requests.get(self.url).text)
+                # Critère
+                if (file == "index.md"): 
+                    id = root.rsplit('/', 1)[1] # ie. 12.1
+                    category = id.rsplit('.', 1)[0] # ie. 12.1
+                    rules[id] = {}
 
-        for member in data:
-            self.members[member.get('id')] = dict(
-                fullname=member.get('fullname'),
-                role=member.get('role'),
-                domain=member.get('domaine'),
-                startups=member.get('startups'),
-                start=self.__start(member.get('missions')),
-                end=self.__end(member.get('missions')),
-                status=self.__status(member.get('missions')),
-            )
+                    data = Path(os.path.join(root, file)).read_text(encoding='utf-8')
+                    md = Markdown(extensions = ['meta'])
+                    md.convert(data)
 
-    def all(self):
-        return self.members
+                    rules[id]['id'] = id
+                    rules[id]['title'] = unmark(md.Meta['title'][0])
+                    rules[id]['category'] = self.get_category(category)
+                    rules[id]['tests'] = []
+                    #print(os.path.join(root, file))
 
-    def designers(self):
-        # List all designers
-        designers = {}
-        for id, member in self.members.items():
-            if ("Design" == member['domain']):
-                designers[id] = member
-        return designers
+                # Tests
+                if (dir == 'tests'):
+                    test = {}
 
-    def __start(self, missions):
-        return missions[0].get('start')
+                    rule = root.rsplit('/', 2)[1] # ie. 12.1
+                    id = file.split('.')[0]
 
-    def __end(self, missions):
-        return missions[-1].get('end')
 
-    def __status(self, missions):
-        # Define if a member is currently working for beta or an alumni
-        end = datetime.strptime(self.__end(missions), '%Y-%m-%d')
-        status = 'En cours' if (end > datetime.today()) else 'Alumni'
-        return status
+                    data = Path(os.path.join(root, file)).read_text(encoding='utf-8')
+                    md = Markdown(extensions = ['meta'])
+                    md.convert(data)
 
-    def get(self, id):
-        return self.members[id]
+                    test['id'] = id
+                    test['title'] = unmark(md.Meta['title'][0])
+
+                    rules[rule]['tests'].append(test)
+            
+        self.rules = rules
+
+
+
+
+
+    def all_categories(self):
+        return self.categories
+
+    def get_category(self, id):
+        return self.categories[id]['title']
+
+    def all_rules(self):
+        return self.rules
+
+
